@@ -1,277 +1,296 @@
+// app/login/page.tsx - COMPLETE LOGIN SYSTEM
 "use client"
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { motion, AnimatePresence } from "framer-motion"
-import { Plus, Target, Shield, CreditCard, Calendar, AlertCircle } from "lucide-react"
+import { motion } from "framer-motion"
+import { Mail, Lock, User, Eye, EyeOff, Loader2, TrendingUp } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { format, differenceInDays, parseISO } from "date-fns"
+import { recalculateUserProjections } from "@/lib/projection-calculator"
 
-// Components
-import { Sidebar } from "@/components/sidebar"
-import { Header } from "@/components/header"
-import { StatCard } from "@/components/stat-card"
-import { ExpenseTracker } from "@/components/expense-tracker"
-import { AssetsInvestments } from "@/components/assets-investments"
-import { AddItemModal } from "@/components/add-item-modal"
-import { DoubleEntryFlow } from "@/components/double-entry-flow"
-import { NetWorthChart } from "@/components/net-worth-chart"
-import { SettingsView } from "@/components/settings-view"
-import { ReportsView } from "@/components/reports-view"
-
-export default function Dashboard() {
+export default function LoginPage() {
   const router = useRouter()
-  const [loading, setLoading] = useState(true)
-  const [user, setUser] = useState<any>(null)
-  
-  // Data States
-  const [transactions, setTransactions] = useState<any[]>([])
-  const [assets, setAssets] = useState<any[]>([])
-  const [liabilities, setLiabilities] = useState<any[]>([])
-  const [goals, setGoals] = useState<any[]>([])
-  const [insurance, setInsurance] = useState<any[]>([])
-  const [projections, setProjections] = useState<any[]>([])
-  const [notifications, setNotifications] = useState<any[]>([])
-  
-  // UI States
-  const [currentView, setCurrentView] = useState("dashboard")
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
-  const [isMobile, setIsMobile] = useState(false)
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [modalType, setModalType] = useState<'transaction' | 'asset' | 'liability' | 'goal'>('transaction')
-  const [editingItem, setEditingItem] = useState<any>(null)
+  const [isLogin, setIsLogin] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+    fullName: ''
+  })
+  const [error, setError] = useState('')
 
-  // --- 1. AUTH & DATA FETCHING ---
-  const handleSignOut = async () => {
-    await supabase.auth.signOut()
-    router.push('/login')
-  }
-
-  const fetchData = async () => {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      router.push('/login')
-      return
-    }
-    setUser(session.user)
-
-    const [txns, asst, liab, goal, insur, proj] = await Promise.all([
-        supabase.from('transactions').select('*').order('date', { ascending: false }),
-        supabase.from('assets').select('*'),
-        supabase.from('liabilities').select('*'),
-        supabase.from('goals').select('*').order('target_year', { ascending: true }),
-        supabase.from('insurance').select('*'), // Fetch Insurance
-        supabase.from('projections').select('*').order('year_number', { ascending: true })
-    ])
-
-    if (txns.data) setTransactions(txns.data)
-    if (asst.data) setAssets(asst.data)
-    if (liab.data) {
-      setLiabilities(liab.data)
-      // CALCULATE NOTIFICATIONS (Bills due in 7 days)
-      const alerts = liab.data
-        .filter(l => l.due_date && differenceInDays(parseISO(l.due_date), new Date()) <= 7 && differenceInDays(parseISO(l.due_date), new Date()) >= 0)
-        .map(l => ({
-          title: `Bill Due Soon: ${l.name}`,
-          message: `Amount: ₹${l.total_amount} is due on ${l.due_date}`
-        }))
-      setNotifications(alerts)
-    }
-    if (goal.data) setGoals(goal.data)
-    if (insur.data) setInsurance(insur.data)
-    if (proj.data) setProjections(proj.data)
-    
-    setLoading(false)
-  }
-
+  // Check if already logged in
   useEffect(() => {
-    fetchData()
-    const checkMobile = () => {
-      const mobile = window.innerWidth < 1024
-      setIsMobile(mobile)
-      if (mobile) setIsSidebarOpen(false)
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        router.push('/')
+      }
     }
-    checkMobile()
-    window.addEventListener("resize", checkMobile)
-    return () => window.removeEventListener("resize", checkMobile)
-  }, [])
+    checkUser()
+  }, [router])
 
-  // --- 2. CALCULATIONS ---
-  const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0)
-  const expenses = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0)
-  const totalAssets = assets.reduce((sum, a) => sum + a.value, 0)
-  const totalDebt = liabilities.reduce((sum, l) => sum + l.total_amount, 0)
-  const netWorth = totalAssets - totalDebt
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
 
-  // --- 3. UI HANDLERS ---
-  const openAddModal = (type: typeof modalType) => {
-    setModalType(type)
-    setEditingItem(null)
-    setIsModalOpen(true)
+    try {
+      if (isLogin) {
+        // LOGIN
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password
+        })
+
+        if (error) throw error
+
+        if (data.user) {
+          router.push('/')
+        }
+      } else {
+        // SIGNUP
+        const { data, error } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
+            data: {
+              full_name: formData.fullName
+            }
+          }
+        })
+
+        if (error) throw error
+
+        if (data.user) {
+          // Initialize user data
+          await initializeNewUser(data.user.id)
+          
+          // Check if email confirmation is required
+          if (data.session) {
+            // Email confirmation disabled - user is logged in immediately
+            console.log('✅ User created and logged in')
+            router.push('/')
+          } else {
+            // Email confirmation required
+            alert('✅ Account created! Please check your email to verify your account before logging in.')
+            setIsLogin(true) // Switch to login tab
+          }
+        }
+      }
+    } catch (error: any) {
+      setError(error.message || 'Authentication failed')
+    } finally {
+      setLoading(false)
+    }
   }
-  const openEditModal = (item: any, type: typeof modalType) => {
-    setModalType(type)
-    setEditingItem(item)
-    setIsModalOpen(true)
-  }
 
-  if (loading) return <div className="h-screen flex items-center justify-center bg-black text-white">Loading Finance.OS...</div>
+  // Initialize new user data
+  const initializeNewUser = async (userId: string) => {
+    try {
+      // 1. Create account balance
+      await supabase.from('account_balance').insert({
+        user_id: userId,
+        current_balance: 0,
+        total_income: 0,
+        total_expenses: 0
+      })
 
-  // --- 4. RENDER CONTENT ---
-  const renderContent = () => {
-    switch (currentView) {
-      case "reports": return <ReportsView transactions={transactions} />
-      case "settings": return <SettingsView user={user} />
-      
-      case "dashboard":
-      default:
-        return (
-          <div className="space-y-8 pb-20">
-            {/* TOP STATS */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 w-full">
-                  <StatCard label="Monthly Income" value={income} currency icon={null} />
-                  <StatCard label="Monthly Expenses" value={expenses} currency icon={null} />
-                  <StatCard label="Total Debt" value={totalDebt} currency trend={-5} icon={null} />
-                  <StatCard label="Net Worth" value={netWorth} currency trend={10} icon={null} />
-               </div>
-            </div>
+      // 2. Seed default expense categories
+      await supabase.rpc('seed_default_categories', { p_user_id: userId })
 
-            {/* MAIN GRID: Charts, Assets, Goals */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 space-y-6">
-                    <NetWorthChart projections={projections} />
-                    
-                    {/* RESTORED: BILL CALENDAR / DUE DATES */}
-                    <div className="bg-card border border-border rounded-lg p-6">
-                       <h3 className="font-bold mb-4 flex items-center gap-2"><Calendar size={20} className="text-purple-400"/> Upcoming Bills</h3>
-                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          {liabilities.filter(l => l.due_date).slice(0, 4).map((l, i) => (
-                             <div key={i} className="flex justify-between items-center p-3 bg-muted/20 rounded border border-border/50">
-                                <div>
-                                   <p className="font-medium text-sm">{l.name}</p>
-                                   <p className="text-xs text-zinc-500">Due: {l.due_date}</p>
-                                </div>
-                                <span className="font-mono font-bold text-red-400">₹{l.total_amount}</span>
-                             </div>
-                          ))}
-                       </div>
-                    </div>
-                </div>
+      // 3. Create initial projections
+      await recalculateUserProjections(userId)
 
-                {/* RIGHT SIDEBAR: Flow, Insurance, Credit Cards */}
-                <div className="space-y-6">
-                   <DoubleEntryFlow income={income} expenses={expenses} assets={totalAssets} />
-                   
-                   {/* RESTORED: INSURANCE VAULT */}
-                   <div className="bg-card border border-border rounded-lg p-6">
-                      <div className="flex justify-between mb-4">
-                         <h3 className="font-bold flex gap-2"><Shield size={20} className="text-green-400"/> Insurance</h3>
-                         <span className="text-xs bg-green-900/30 text-green-400 px-2 py-1 rounded">Active</span>
-                      </div>
-                      {insurance.length > 0 ? insurance.map((ins, i) => (
-                         <div key={i} className="mb-3 p-3 bg-muted/10 rounded">
-                            <p className="text-sm font-bold">{ins.policy_name}</p>
-                            <div className="flex justify-between text-xs text-zinc-500 mt-1">
-                               <span>{ins.provider}</span>
-                               <span>Exp: {ins.expiry_date}</span>
-                            </div>
-                         </div>
-                      )) : <p className="text-xs text-zinc-500">No policies added.</p>}
-                   </div>
-
-                   {/* RESTORED: CREDIT CARDS */}
-                   <div className="bg-card border border-border rounded-lg p-6">
-                      <h3 className="font-bold mb-4 flex gap-2"><CreditCard size={20} className="text-blue-400"/> Credit Cards</h3>
-                      {liabilities.filter(l => l.type === 'credit_card' || l.type === 'loan').slice(0, 3).map((l, i) => (
-                         <div key={i} className="flex justify-between items-center mb-3 p-2 border-b border-border/30">
-                            <span className="text-sm">{l.name}</span>
-                            <span className="text-xs font-mono bg-red-900/20 text-red-400 px-2 py-1 rounded">₹{l.total_amount}</span>
-                         </div>
-                      ))}
-                   </div>
-                </div>
-            </div>
-            
-            {/* BOTTOM SECTION: Expenses & Goals */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-               <div className="space-y-6">
-                  <ExpenseTracker transactions={transactions} />
-                  <AssetsInvestments assets={assets} />
-               </div>
-               <div className="bg-card border border-border rounded-lg p-6 h-fit">
-                  <div className="flex justify-between items-center mb-4">
-                     <h3 className="text-lg font-bold flex items-center gap-2"><Target size={20} className="text-accent"/> Goals</h3>
-                     <button onClick={() => openAddModal('goal')} className="text-xs bg-zinc-800 px-2 py-1 rounded hover:text-white">Add Goal</button>
-                  </div>
-                  <div className="space-y-3">
-                      {goals.map((g, i) => (
-                          <div key={i} onClick={() => openEditModal(g, 'goal')} className="flex items-center justify-between p-3 bg-muted/20 rounded border border-border/50 cursor-pointer hover:border-accent">
-                              <div>
-                                  <p className="font-bold text-sm">{g.name}</p>
-                                  <p className="text-xs text-muted-foreground">{g.target_year}</p>
-                              </div>
-                              <div className="text-right">
-                                  <p className="font-mono text-sm text-accent">Target: ₹{g.target_amount.toLocaleString()}</p>
-                                  <p className="text-xs text-green-400">{g.status}</p>
-                              </div>
-                          </div>
-                      ))}
-                  </div>
-               </div>
-            </div>
-          </div>
-        )
+      console.log('User data initialized successfully')
+    } catch (error) {
+      console.error('Error initializing user data:', error)
     }
   }
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground overflow-hidden">
-      <Sidebar 
-        currentView={currentView} 
-        onNavigate={setCurrentView} 
-        isOpen={isSidebarOpen} 
-        setIsOpen={setIsSidebarOpen} 
-        isMobile={isMobile} 
-        onSignOut={handleSignOut}
-      />
-
-      <main className={`flex-1 overflow-y-auto h-screen transition-all duration-300 ${isSidebarOpen && !isMobile ? 'ml-64' : 'ml-0'}`}>
-        <Header 
-          onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)} 
-          onSignOut={handleSignOut}
-          onSettingsClick={() => setCurrentView('settings')}
-          user={user}
-          notifications={notifications}
+    <div className="min-h-screen bg-gradient-to-br from-black via-zinc-900 to-black flex items-center justify-center p-4">
+      {/* Background Animation */}
+      <div className="absolute inset-0 overflow-hidden">
+        <motion.div
+          animate={{
+            scale: [1, 1.2, 1],
+            rotate: [0, 90, 0],
+          }}
+          transition={{ duration: 20, repeat: Infinity }}
+          className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl"
         />
+        <motion.div
+          animate={{
+            scale: [1.2, 1, 1.2],
+            rotate: [90, 0, 90],
+          }}
+          transition={{ duration: 15, repeat: Infinity }}
+          className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl"
+        />
+      </div>
 
-        <div className="p-4 md:p-8 max-w-[1600px] mx-auto relative">
-          <AnimatePresence mode="wait">
-            <motion.div key={currentView} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-              {renderContent()}
-            </motion.div>
-          </AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative z-10 w-full max-w-md"
+      >
+        {/* Logo & Title */}
+        <div className="text-center mb-8">
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: "spring", duration: 0.6 }}
+            className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent mb-4"
+          >
+            <TrendingUp size={32} className="text-black" />
+          </motion.div>
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-primary via-accent to-secondary bg-clip-text text-transparent mb-2">
+            Finance.OS
+          </h1>
+          <p className="text-zinc-400">Your Personal Finance Operating System</p>
         </div>
-      </main>
 
-      {/* ADD DATA MODAL */}
-      {currentView !== 'dashboard' && currentView !== 'reports' && currentView !== 'settings' && (
-         <motion.button
-           whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-           onClick={() => openAddModal(currentView === 'budget' ? 'transaction' : currentView === 'liabilities' ? 'liability' : 'asset')}
-           className="fixed bottom-8 right-8 bg-primary text-black p-4 rounded-full shadow-lg z-50 flex items-center gap-2 font-bold"
-         >
-           <Plus size={24} /> Add Data
-         </motion.button>
-      )}
+        {/* Login/Signup Card */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-card border border-border rounded-2xl p-8 shadow-2xl backdrop-blur-sm"
+        >
+          {/* Toggle Tabs */}
+          <div className="flex gap-2 mb-6 p-1 bg-muted/30 rounded-lg">
+            <button
+              onClick={() => { setIsLogin(true); setError('') }}
+              className={`flex-1 py-2 rounded-lg font-semibold transition-all ${
+                isLogin 
+                  ? 'bg-primary text-black shadow-lg' 
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Login
+            </button>
+            <button
+              onClick={() => { setIsLogin(false); setError('') }}
+              className={`flex-1 py-2 rounded-lg font-semibold transition-all ${
+                !isLogin 
+                  ? 'bg-primary text-black shadow-lg' 
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Sign Up
+            </button>
+          </div>
 
-      <AddItemModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-        type={modalType} 
-        initialData={editingItem}
-        onSuccess={fetchData} 
-      />
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Full Name (Signup only) */}
+            {!isLogin && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+              >
+                <label className="text-xs text-zinc-400 uppercase font-bold">Full Name</label>
+                <div className="relative mt-1">
+                  <User className="absolute left-3 top-3.5 text-zinc-500" size={18} />
+                  <input
+                    type="text"
+                    required
+                    value={formData.fullName}
+                    onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                    className="w-full pl-10 p-3 bg-zinc-900 border border-zinc-700 rounded-lg text-white focus:border-primary outline-none transition-colors"
+                    placeholder="John Doe"
+                  />
+                </div>
+              </motion.div>
+            )}
+
+            {/* Email */}
+            <div>
+              <label className="text-xs text-zinc-400 uppercase font-bold">Email</label>
+              <div className="relative mt-1">
+                <Mail className="absolute left-3 top-3.5 text-zinc-500" size={18} />
+                <input
+                  type="email"
+                  required
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="w-full pl-10 p-3 bg-zinc-900 border border-zinc-700 rounded-lg text-white focus:border-primary outline-none transition-colors"
+                  placeholder="you@example.com"
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="text-xs text-zinc-400 uppercase font-bold">Password</label>
+              <div className="relative mt-1">
+                <Lock className="absolute left-3 top-3.5 text-zinc-500" size={18} />
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="w-full pl-10 pr-10 p-3 bg-zinc-900 border border-zinc-700 rounded-lg text-white focus:border-primary outline-none transition-colors"
+                  placeholder="••••••••"
+                  minLength={6}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-3.5 text-zinc-500 hover:text-white"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+              {!isLogin && (
+                <p className="text-xs text-zinc-500 mt-1">Minimum 6 characters</p>
+              )}
+            </div>
+
+            {/* Error Message */}
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm"
+              >
+                {error}
+              </motion.div>
+            )}
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-primary text-black font-bold py-3 rounded-lg hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" size={20} />
+                  {isLogin ? 'Logging in...' : 'Creating account...'}
+                </>
+              ) : (
+                isLogin ? 'Login' : 'Create Account'
+              )}
+            </button>
+          </form>
+
+          {/* Forgot Password */}
+          {isLogin && (
+            <div className="mt-4 text-center">
+              <button className="text-xs text-zinc-400 hover:text-primary transition-colors">
+                Forgot password?
+              </button>
+            </div>
+          )}
+        </motion.div>
+
+        {/* Footer */}
+        <p className="text-center text-xs text-zinc-500 mt-6">
+          By continuing, you agree to Finance.OS Terms & Privacy Policy
+        </p>
+      </motion.div>
     </div>
   )
 }
